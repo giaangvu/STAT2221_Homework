@@ -1,0 +1,323 @@
+---
+title: "STAT 2221 - Homework 5 - Spectral clustering & random graph models"
+author:
+  name: Giang Vu
+  affiliation: University of Pittsburgh
+date: "October 2021"
+---
+
+# Part I (stochastic blockmodels)
+```{r setup, message=FALSE}
+# Preliminaries
+library(igraph) # package for network analysis & random graphs
+library(irlba) # package for numerical linear algebra routines
+library(mclust) # package for Gaussian mixture model clustering
+library(rgl)
+library(OTclust)
+options(scipen = 999)
+```
+
+Consider the following setup that generates a random stochastic blockmodel (SBM) graph, saved as *my.graph*.
+
+```{r out.width="33%"}
+# SBM model 1
+
+n <- 5000
+rho <- log(n)/n
+aa <- 4.5
+bb <- 0.25
+cc <- 4.5
+block.sizes = c(1/2, 1/2)*n
+
+# above - specified inputs
+########################################
+# below - automated inputs/outputs
+
+pref.matrix <- rho*rbind(c(aa, bb),
+                         c(bb, cc)) #this is matrix B - prob of edge between group i and j
+
+set.seed(1234)
+
+my.graph <- sample_sbm(n, pref.matrix, block.sizes, directed = FALSE, loops = TRUE)
+
+
+#2 leading eigenvals and vectors of adjacency matrix
+adj_ed <- embed_adjacency_matrix(my.graph, 2, which="lm", scaled = F)
+adj_ed$D
+head(adj_ed$X)
+
+#2 smallest eigenvals and vectors of laplacian
+lap_ed <- embed_laplacian_matrix(my.graph, 2, which = "sa", scaled = F)
+lap_ed$D
+head(lap_ed$X)
+```
+
+(0) Examine the eigenstructure of the adjacency matrix and of graph Laplacians corresponding to *my.graph*. Discuss what aspects of the graph are revealed by its eigenvalues and eigenvectors. Namely, what is the 'ground truth' underlying the generated data?
+
+Based on the way the data is generated from the given code, we can see that he ground truth about the generated data is that the first 2500 vertices are from first cluster, and the last 2500 vertices are from the second cluster. We have 2 clusters of equal size in this first model. Therefore, it's enough to look at only the 2 leading (largest) eigenvalues and their associated eigenvectors for the adjacency matrix, or the 2 smallest eigenvalues and their associated eigenvectors for the graph Laplacian. Those eigenvalues and (head of) eigenvectors are displayed above.\
+For the later models, we are still looking at a situation with 2 clusters only, but the number in each cluster might be changed along with the sparsity factor $\rho$ and $aa$, $bb$, $cc$.\
+
+For all SBM models provided below, including the one above, do the following:
+
+(1) Cluster the eigenvectors of the graphs' adjacency matrices using *kmeans* and *Mclust*.
+
+Below is the process I went through for this problem. I defined a master function that takes inputs of $n$, $\rho$, $aa$, $bb$, $cc$, $block.sizes$. From the inputs the function will form the B matrix of independent Bernoulli, and then generate a sample of stochastic block model. The adjacency matrix is generated and its 2 leading eigenvectors are then calculated. After that, the function will apply both k-means method and Gaussian mixtrue model (Mclust) on the matrix formed by those 2 eigenvectors.\
+
+(2) Compute the adjusted rand index (ARI) between the clusterings you obtain and the ground truth clusterings.
+
+The master function I defined above calculates the ARI between the clusterings from ground truth versus the clusterings from k-means and MClust. It will output these ARI scores in 2-column table.\
+Other outputs of this master function include the clustering plot of 2 leading eigenvectors for the ground truth, k-means method, and MClust method; as well as the matrix of independent Bernoulli B that contains the probability of edge for vertexes in same/different cluster.\
+Below you can find the detail of the function, as well as the results when it's applied to all of the models we have here.\
+
+(3) Are your findings surprising? Discuss. Describe the ways in which the SBM models are related to and differ from one another.
+
+My findings are not really surprising, because they mostly agree with what I learnt in lecture (Lei, Rinaldo 2015).\
+When we apply k-means on the matrix form by the 2 leading eigenvectors of the adjacency matrix, we are carrying out community discovery using spectral clustering. From the lecture, we learnt that whether the discovery is easy or not depends on the number of communities and the community size imbalance.\
+This can be demonstrated by the performance of spectral clustering in model 1 versus model 3. There's a balance between 2 clusters with model 1 so our clustering matches ground truth perfectly (ARI = 1), while in model 3 the second cluster is 9 times bigger than the first, leading to a very poor performance of spectral clustering. MClust method does well in both situations.\
+In addition, we learnt that there is a competition between $n \rightarrow \infty $ and $\rho \rightarrow 0$, so we need $n \rho \rightarrow \infty$ as fast as possible. Also, when $\rho$ is close to zero, it's more difficult to identify communities.\
+Comparing model 1 versus model 2, everything is the same except for value of $rho$, for model 2, the product $n \rho$ is a constant when $n \rightarrow \infty $ and $\rho \rightarrow 0$, so it makes sense when the spectral clustering method performed worse for model 2 than model 1. Gaussian mixture modelling didn't do too well for model 2 either.\
+However, when we compare models 5.A, 5.B, 5.C together, the only difference between them are the value of $rho$ again, and we can see that the model with smaller sparsity factor actually had better performance with spectral clustering, so this could be due to the way the matrix B is set up as well. This relates to the idea of two-truth clustering that I will discuss in the next question. MClust outperformed in all 3 models, and it gave really close clustering to the truth in 5A and 5B.\
+The way the matrix B of independent Bernoulli is defined can also affect performance of spectral clustering. If we compare model 1 and model 4, the only difference is the matrix B, in the sense that in model 1, the probability of edge between vertices from the same cluster is much higher than vertices from different clusters compared to model 4. This means that the data generated in model 1 have more defined separation between two groups, while that of model 4 is less pronounced, so that could be why the spectral clustering method did better in model 1 where everything is already clear cut. MClust didn't do well in model 4 either.\
+
+(4) Notice that the methodology in Priebe et al. (2019) differs from the von Luxburg survey! Explain and discuss, with examples.\
+
+In Priebe et al. (2019), we learnt about the two-truth phenomenon, where the spectral method could find fundamentally different but equally meaningful network structure. Depending on how our block model is set up, if $a,c \gg b$, the matrix B exhibits **affinity structure** (each of the two blocks has a relatively high within block connectivity probability compared with the between-block connectivity probability). The example for this structure is the first 3 models.\
+On the other hand, if $a \gg b, c$, the matrix B exhibits **core-periphery structure** (one of the two blocks has a relatively high within-block connectivity probability compared with both the other block’s within-block connectivity probability and the between-block connectivity probability.). The example for this could be our 3 models 5.A, 5.B, 5.C. This is why when we compare the clustering plots between ground truth and spectral clustering, the division of 2 communities are completely different (ground truth partition the points vertically, while the spectral clustering draws a horizontal line cutting through the points)\
+From the lecture, we learnt that informally, LSE (Laplacian spectral embedding) outperforms ASE (Adjacency spectral embedding) for affinity, and ASE is the better choice for core–periphery. I tried applying both methods on a new model 6 with $a \gg b, c$ (core-periphery), and the ARI scores suggest the same thing we learnt, ASE seems to outperform here.\
+
+### SBM model 1
+```{r out.width="33%"}
+#master function
+master_sbm <- function(n, rho, aa, bb, cc, block.sizes){
+  #matrix B
+  pref.matrix <- rho*rbind(c(aa, bb),
+                           c(bb, cc))
+  set.seed(1234)
+  #generate graph
+  my.graph <- sample_sbm(n, pref.matrix, block.sizes, directed = FALSE, loops = TRUE)
+  #generate ground truth clustering
+  true_block <- rep(1:2, c(block.sizes))
+  #eigen decomp of adjacency
+  #adj_ed <- embed_adjacency_matrix(my.graph, 2, which="lm", scaled = F)
+  adj_ed <- partial_eigen(as_adj(my.graph), n = 2)
+  #k means on leading 2 eigenvectors of A
+  km <- kmeans(adj_ed$vectors, centers = 2)
+  #gaussian mixture on leading 2 eigenvectors of A
+  gm <- Mclust(adj_ed$vectors, verbose = F, G=2)
+  #ARI of kmeans vs ground truth
+  ARI.km <- compare(as_membership(km$cluster), as_membership(true_block), method = "adjusted.rand")
+  #ARI of gaussian mixture vs ground truth
+  ARI.gm <- compare(as_membership(gm$classification), as_membership(true_block), method = "adjusted.rand")
+  result <- list()
+  plot(adj_ed$vectors, col = true_block, xlab = "First eigenvector of Adjacency",
+       ylab = "Second eigenvector of Adjacency", main = "Ground truth clustering")
+  result[[1]] <- recordPlot()
+  plot(adj_ed$vectors, col = km$cluster, xlab = "First eigenvector of Adjacency",
+       ylab = "Second eigenvector of Adjacency", main = "Spectral clustering")
+  result[[2]] <- recordPlot()
+  plot(adj_ed$vectors, col = gm$classification, xlab = "First eigenvector of Adjacency",
+       ylab = "Second eigenvector of Adjacency", main = "MClust clustering")
+  result[[3]] <- recordPlot()
+  result[[4]] <- data.frame(ARI_k_means = ARI.km, ARI_mclust = ARI.gm)
+  result[[5]] <- pref.matrix
+  return(result)
+}
+
+#apply on model 1
+master_sbm(n, rho, aa, bb, cc, block.sizes)
+```
+
+### SBM model 2
+```{r out.width="33%"}
+
+# SBM model 2
+n <- 5000
+rho <- 1/n
+aa <- 4.5
+bb <- 0.25
+cc <- 4.5
+block.sizes = c(1/2, 1/2)*n
+
+master_sbm(n, rho, aa, bb, cc, block.sizes)
+```
+
+### SBM model 3
+```{r out.width="33%"}
+
+# SBM model 3
+n <- 5000
+rho <- log(n)/n
+aa <- 4.5
+bb <- 0.25
+cc <- 4.5
+block.sizes = c(1/10, 9/10)*n
+
+master_sbm(n, rho, aa, bb, cc, block.sizes)
+```
+
+### SBM model 4
+```{r out.width="33%"}
+
+# SBM model 4
+n <- 500
+rho <- log(n)/n
+aa <- 4.5
+bb <- 2.5
+cc <- 4.5
+block.sizes = c(1/2, 1/2)*n
+
+master_sbm(n, rho, aa, bb, cc, block.sizes)
+```
+
+### SBM model 5.A
+```{r out.width="33%"}
+
+# SBM model 5.A
+n <- 5000
+rho <- 1/10
+aa <- 4
+bb <- 2
+cc <- 1
+block.sizes = c(1/2, 1/2)*n
+
+master_sbm(n, rho, aa, bb, cc, block.sizes)
+```
+
+### SBM model 5.B
+```{r out.width="33%"}
+
+# SBM model 5.B
+n <- 5000
+rho <- 1/100
+aa <- 4
+bb <- 2
+cc <- 1
+block.sizes = c(1/2, 1/2)*n
+
+master_sbm(n, rho, aa, bb, cc, block.sizes)
+```
+
+### SBM model 5.C
+```{r out.width="33%"}
+
+# SBM model 5.C
+n <- 5000
+rho <- 1/1000
+aa <- 4
+bb <- 2
+cc <- 1
+block.sizes = c(1/2, 1/2)*n
+
+master_sbm(n, rho, aa, bb, cc, block.sizes)
+```
+
+### SBM model 6
+```{r out.width="33%"}
+n <- 5000
+rho <- 1/1000
+aa <- 7
+bb <- 2
+cc <- 1
+block.sizes = c(1/2, 1/2)*n
+true_block <- rep(1:2, c(block.sizes))
+pref.matrix <- rho*rbind(c(aa, bb),
+                           c(bb, cc))
+set.seed(1234)
+#generate graph
+my.graph <- sample_sbm(n, pref.matrix, block.sizes, directed = FALSE, loops = TRUE)
+
+#find smallest eigen of laplacian and largest eigen of adjacency
+lap_ed <- partial_eigen(-graph.laplacian(my.graph, normalized = F), n = 2)
+adj_ed <- partial_eigen(as_adj(my.graph), n =2)
+#k means on 2nd smallest eigenvector of Laplacian (LSE) and  2 largest of adjacency (ASE)
+km.LSE <- kmeans(lap_ed$vectors, centers = 2)
+km.ASE <- kmeans(adj_ed$vectors, centers=2)
+#compare result of LSE and ASE
+adjustedRandIndex(km.LSE$cluster, true_block)
+adjustedRandIndex(km.ASE$cluster, true_block)
+```
+
+# Part II (spectral relaxations)
+Section 5.4 of von Luxburg (2007) mentions that in general, "there is no guarantee whatsoever on the quality of the solution of the relaxed [min cut optimization] problem compared to the exact solution" [p.403]. Here we investigate further.
+
+Consider the so-called cockroach graphs from Guattery and Miller (1998) as presented in von Luxburg (2007). 
+
+(1) Using R, numerically confirm the discussion of cut properties and eigenstructure as detailed on pages 403--404. In other words, generate and analyze large cockroach graphs.
+
+I defined the adjacency matrix A like below, with $k=15$ in order to get a graph (from package *igraph*). Then I plotted the vertices and the edges of the graph to mimic the cockroach/ladder graph in lecture.\
+We can see a ladder-shaped plot, half of whose rungs have been "kicked out", the other halves are connected.\
+Based on what we learnt in lecture, the exact RatioCut solution would be the optimal vertical cut that separate the unconnected part of the ladder versus the connected part of the ladder. Specifically, the ideal result would be vertices from 1 to 15, and from 31 to 45 to belong in one community, while the rest belong in the other community.\
+However, in practice we often use the approximation approach for RatioCut for ease of calculation, and it's essentially applying unnormalized spectral clustering algorithm (i.e. applying k-means on the second smallest eigenvector of the unnormalized Laplacian matrix). This approximation will give use the horizontal cut that cut through all the edges (rungs) of the ladder. We will get vertices from 1 to 30 in one group, and 31 to 60 in another group. This is consider a worse result than the exact RatioCut solution, because we are cutting through so many more edges of our graph.\ 
+(I apologize for this cockroach graph if the labels on the vertices are hard to read, I couldn't figure out how to change the size of the plot post-knitting. The sizing looks good in R itself but it always shrinks when I knit the document)
+I also tried to do relaxed RatioCut (spectral clustering) by applying k-means on the 2nd smallest eigenvector of the unnormalized Laplacian, and the result clustering is plotted below as well, but somehow it didn't give me 2 equal-size clusters like in the theory. The cut does cut horizontally, but it's not a half and half result like I expected.\
+
+```{r}
+k <- 15
+#adjacency matrix
+A <- matrix(0,nrow=4*k,ncol=4*k)
+for (i in 1:(4*k-1)) {
+  A[i,i+1]=A[i+1,i]=1
+}
+for (i in 1:k) {
+  A[k+i,3*k+i]=A[3*k+i,k+i]=1
+}
+A[2*k,2*k+1]=A[2*k+1,2*k]=0
+
+D=diag(rowSums(A))
+L=D-A #unnormalized laplacian
+
+#visualize the idea of the roach plot
+cr.graph <- graph.adjacency(A)
+layout.m <- matrix(c(rep(c(1:30),2),rep(5,30),rep(2,30)), nrow = 60, ncol = 2, byrow = F)
+plot(cr.graph, layout = layout.m, vertex.size=8, vertex.label.cex=0.6)
+
+#try to do spectral clustering
+set.seed(123)
+X <- partial_eigen(-L,n=5)$vectors[,2]
+X.km <- kmeans(X, centers = 2) #applying k means on unnormalized lapla's eigen vectors => approximation of RatioCut (relaxed)
+plot(X, col = X.km$cluster)
+
+```
+
+
+(2) How do your findings change in the presence of perturbations (i.e., stochastic/deterministic modifications to edges and/or vertices)? You are free to specify different choices of perturbation mechanisms.
+
+I tried a perturbation method by adding Gaussian noise (mean 0 and variance 0.01 times average variance of all variables) to the adjacency matrix with the function *perturb()* from package *OTclust*. The spectral clustering result on this new perturbed adjacency/Laplacian is very different from the original result we had above (indicated by really low ARI compared to above clustering). We can see the eigenstructure of the Laplacian changed a lot too, by looking at the clustering plot. This is a stochastic modification to the network, and I guess it was too big of a perturbation so that's why the result changed so drastically.\
+
+We learnt from lecture that if the perturbations are not too large, then k-means algorithm will still separate the groups from each other. I then tried a deterministic and less extreme perturbation by just adding a small arbitrary value $\epsilon=0.002$ in to the adjacency matrix. The result clustering is exactly the same as the original clustering (ARI=1), and by looking at the plot, we could tell this perturbation doesn't change the eigenstructure at all like the Gaussian noise. This is definitely a less extreme modification of the network.\
+
+```{r}
+#adding Gaussian noise
+Ap <- perturb(A, method =1)
+
+Dp=diag(rowSums(Ap))
+Lp=Dp-Ap #unnormalized laplacian
+
+#try to do spectral clustering with perturbed laplacian
+set.seed(123)
+Xp <- partial_eigen(-Lp,n=5)$vectors[,2]
+Xp.km <- kmeans(Xp, centers = 2) #applying k means on unnormalized lapla's eigen vectors => approximation of RatioCut (relaxed)
+plot(Xp, col = Xp.km$cluster, main = "Clustering of stochastically perturbed network")
+
+#adjusted rand for perturbed clustering vs original clustering
+adjustedRandIndex(X.km$cluster, Xp.km$cluster)
+
+#deterministic perturbation
+epsi <- 0.002
+Ap <- A + epsi
+Dp=diag(rowSums(Ap))
+Lp=Dp-Ap #unnormalized laplacian
+
+#try to do spectral clustering with perturbed laplacian
+set.seed(123)
+Xp <- partial_eigen(-Lp,n=5)$vectors[,2]
+Xp.km <- kmeans(Xp, centers = 2) #applying k means on unnormalized lapla's eigen vectors => approximation of RatioCut (relaxed)
+plot(Xp, col = Xp.km$cluster, main = "Clustering of deterministically perturbed network")
+
+#adjusted rand for perturbed clustering vs original clustering
+adjustedRandIndex(X.km$cluster, Xp.km$cluster)
+```
+
+*Bonus:* Design *adversarial perturbations* that degrade the quality of cuts and spectral clusterings for cockroach graphs. Alternatively, demonstrate that cockroach graphs possess robustness to particular types of graph (matrix) perturbations.
+
+*Bonus:* Investigate and explain the properties of spectral clustering in stochastic blockmodels with more than two communities.

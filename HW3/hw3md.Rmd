@@ -1,0 +1,214 @@
+---
+title: ''
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F)
+library(nlme)
+library(lme4)
+library(dplyr)
+library(plyr)
+library(MASS)
+library(glmnet)
+library(leaps)
+library(minpack.lm)
+library(broom)
+library(lmtest)
+library(rrr)
+library(caret)
+library(stats)
+library(ggplot2)
+library(ggfortify)
+library(irlba)
+library(RSpectra)
+library(igraph)
+library(factoextra)
+options(scipen = 999)
+```
+
+```{r}
+setwd("/Users/giangvu/Desktop/STAT 2221 - Advanced Applied Multivariate Analysis/HW/HW3")
+load("SwissBankNotes-1.rda")
+hw3.dat <- as.data.frame(scale(SwissBankNotes, scale = T, center = T))
+# The file SwissBankNotes.txt consists of six variables measured on 200 old Swiss 1,000-franc bank notes. The first 100 are genuine and the second 100 are counterfeit. The six variables are length of the bank note, height of the bank note, measured on the left, height of the bank note, measured on the right, distance of inner frame to the lower border, distance of inner frame to the upper border, and length of the diagonal.
+
+#define a master function
+my.pca <- function(data, cor=FALSE){
+  result <- list()
+  r <- ncol(data)
+  #run pca
+  pca.obj <- princomp(data, cor = cor)
+  result[[1]] <- pca.obj
+  eigval <- (pca.obj$sdev)^2
+  #kaiser's
+  result[[2]] <- eigval > 1 #keep only PC with variance greater than 1
+  #rank trace
+  dC <- NULL
+  dE <- NULL
+  eigval_sq <- eigval^2
+  for (j in 1:(r-1)){
+  dC[j] <- sqrt(1-(j/r))
+  dE[j] <- sqrt(sum(eigval_sq[(j+1):r])/sum(eigval_sq))
+    }
+  dC <- c(1, dC, 0)
+  dE <- c(1, dE, 0)
+  names(dC) <- c(0, 1:r)
+  names(dE) <- c(0, 1:r)
+  plot(dC, dE, col="red", type="b", main="PC rank-trace plot") 
+  text(dC, dE, names(dC), pos=3)
+  result[[3]] <- recordPlot()
+  #profile likelihood
+  result[[4]] <- dim_select(sort((pca.obj$sdev)^2, decreasing = T)) #use zhu and ghodsi's method to choose # of comps to keep
+  names(result) <- c("pca_object", "kaiser", "rank_trace_plot", "profile_likelihood_zhu_ghodsi")
+  return(result)
+}
+```
+
+I have defined a master function to display PCA results, along with choices of dimensionality using the 3 following methods: \
+($\alpha$) Kaiser's rule of unity (drop all PC's with variance $\leq$ 1) \
+($\beta$) RC rank trace method \
+($\alpha$) Zhu & Ghodsi's profile likelihood procedure \
+This master function's inputs include "data" which is a dataframe containing all our $X$ variables, each containing in one column, as well as "cor" which is a logical value (TRUE if we want to use correlation matrix, FALSE if we want to use covariance matrix).\
+The function's outputs are as follows\
+**pca_object**: this is the full object containing PCA result from princomp() in base R. When we run the master function alone it will show the estimated standard deviation for each decomposition, but if we save the result of master function in a object, then we can index all the other details of a usual princomp object as well (loadings, scores, etc.). \
+**kaiser**: this is the result of choice for dimensionality (what number of PCs to retain) using method ($\alpha$). TRUE means that that PC is retained, FALSE means that that PC is ommitted.\
+**rank_trace_plot**: this is the PC rank trace plot of method ($\beta$), plotting $\Delta \hat{C}^{(t)}$ and $\Delta \hat{\Sigma}^{(t)}_{\varepsilon\varepsilon}$ based on equations (7.38) and (7.39) in page 207, Izenman.\
+**profile_likelihood_zhu_ghodsi**: this is the result of the estimated $q$ of method ($\gamma$), which is just the point up to which we should retain our PCs. I referred to the function dim_select() in packages "igraph" for this procedure.\
+Please refer to the attached R markdown file if you want more details about the master function.\
+
+And below is the results of the function applied on (i) only 100 geniune bank notes, (ii) only 100 counterfeit bank notes, and (iii) all bank notes as well as my discussion.\
+
+## **(i) PCA on only 100 genuine bank notes**
+
+```{r}
+hw3.real <- hw3.dat[1:100,]
+```
+
+On only 100 genuine bank notes, using both covariance and correlation matrices, the methods of Kaiser and Zhu & Ghodsi's both gave similar numbers of PCs to retain. For covariance, they suggest we keep only 1 PC while for correlation matrix, they suggest we keep the first 2 PCs.\
+Whereas with the PC rank trace method, we end up with higher dimensionality. Looking at the rank trace plots for covariance matrix and correlation matrix, we are suggested to keep 3-4 and 4-5 PCs, respectively.\
+So if our goal is to reduce as much dimensionality as we can, then methods ($\alpha$) and ($\gamma$) would be more suitable for that.\
+
+
+### **(a) PCA using covariance matrix**
+
+```{r, out.width="80%"}
+my.pca(hw3.real, cor = F)
+
+# pca.real <- princomp(hw3.real)
+# # summary(pca.real)
+# # pca.real$scores
+# # pca.real$loadings
+# 
+# #plot pairs
+# pairs(pca.real$scores[,1:6])
+# 
+# #scree plot
+# #screeplot(pca.real, type = "line", main = "Scree plot")
+# 
+# #kaiser's
+# (pca.real$sdev)^2 > 1 #keep only PC1
+# 
+# #rank trace
+# r<-6
+# dC <- NULL
+#   dE <- NULL
+#   eigval_sq <- temp^2
+#   for (j in 1:(r-1)){
+#   dC[j] <- sqrt(1-(j/r))
+#   dE[j] <- sqrt(sum(eigval_sq[(j+1):r])/sum(eigval_sq))
+#     }
+#   dC <- c(1, dC, 0)
+#   dE <- c(1, dE, 0)
+#   names(dC) <- c(0, 1:r)
+#   names(dE) <- c(0, 1:r)
+#   plot(dC, dE, col="red", type="b", main="PC rank-trace plot") 
+#   text(dC, dE, names(dC), pos=3)
+# 
+# #profile likelihood
+
+
+```
+
+### **(b) PCA using correlation matrix**
+```{r, out.width="80%"}
+my.pca(hw3.real, cor = T)
+# pca.cor.real <- princomp(hw3.real, cor = T)
+# # summary(pca.cor.real)
+# # pca.cor.real$scores
+# # pca.cor.real$loadings
+# 
+# #plot pairs
+# pairs(pca.cor.real$scores[,1:6])
+# 
+# #kaiser's
+# (pca.cor.real$sdev)^2 > 1 #keep PC1 and 2
+# 
+# #rank trace
+# 
+# 
+# #profile likelihood
+
+
+```
+
+\newpage
+## **(ii) PCA on only 100 counterfeit bank notes**
+
+```{r}
+hw3.fake <- hw3.dat[101:200,]
+```
+
+On only 100 counterfeit bank notes, using both covariance and correlation matrices, we get quite similar results, and the overall results don't seem too different from the data with 100 genuine bank notes.\ 
+The methods of Kaiser and Zhu & Ghodsi's both gave fairly similar numbers of PCs to retain. For covariance matrix case, Kaiser's method suggests we keep only 1 PC while Zhu & Ghodsi's suggests we keep 2. For correlation matrix, they both suggest we keep the first 2 PCs.\
+Whereas with the PC rank trace method, we again have higher dimensionality. Looking at the rank trace plots for covariance matrix and correlation matrix, we are suggested to keep 5 and 4 PCs, respectively.\
+Again, we have method ($\gamma$) giving us the highest number of PCs to retain, thus lesser dimentionality reduction.\
+
+### **(a) PCA using covariance matrix**
+```{r, out.width="80%"}
+my.pca(hw3.fake, cor = F)
+```
+
+### **(b) PCA using correlation matrix**
+```{r, out.width="80%"}
+my.pca(hw3.fake, cor = T)
+```
+
+\newpage
+## **(iii) PCA on all bank notes**
+
+On the entire data of 200 bank notes, using both covariance and correlation matrices, we get quite similar results again, and the overall results seem similar from the 2 previous cases with partial data.\ 
+The methods of Kaiser and Zhu & Ghodsi's give different numbers of PCs to retain now. For both covariance matrix and correlation matrix, Kaiser's method suggests we keep 2 PCs, while Zhu & Ghodsi's suggests we keep only 1.\
+Using the PC rank trace method, we also have higher dimensionality. Looking at the rank trace plots for covariance matrix and correlation matrix, which are very similar to each other, we are suggested to keep 3-4 PCs.\
+Overall, we have fairly similar results regardless of what data we use, and out of the three methods to choose dimensions, methods ($\gamma$) always reduces the least, while the other two methods reduces dimensionality the most.\
+
+### **(a) PCA using covariance matrix**
+```{r, out.width="80%"}
+my.pca(hw3.dat, cor = F)
+```
+
+### **(b) PCA using correlation matrix**
+```{r, out.width="80%"}
+my.pca(hw3.dat, cor = T)
+```
+
+After looking at everything, I am inclined to choose the first 2 PCs. And for the full dataset with 200 bank notes using covariance matrix, I'm including the pair-wise plot for 6 PCs, as well as the standalone plot of the first and second PCs. And there's also a scree plot to see the variances explained by PCs too, which shows us that indeed the first 2 PCs explain most of the variances.\
+
+```{r, out.width="50%"}
+pca.full <- princomp(hw3.dat)
+#par(mfrow=c(4, 1))
+#pair wise pc plot
+pairs(pca.full$scores[,1:6])
+
+#pc 1-2 plot
+plot(x=pca.full$scores[,1], y = pca.full$scores[,2],
+     pch = c(rep(3, 100), rep(1, 100)),
+     col = c(rep("blue", 100), rep("red", 100)),
+     xlab = "PC1", ylab = "PC2", main = "First vs. Second PC",
+     cex.lab = 1.2, cex.axis = 1.2)
+
+#screeplots
+screeplot(x= pca.full, type = "line", main = "Scree plot", cex.main = 1.8)
+plot(pca.full, main = "Variance bar plot", cex.main = 1.8)
+
+```

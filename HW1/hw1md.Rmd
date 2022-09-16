@@ -1,0 +1,168 @@
+---
+title: ""
+author: ""
+date: ""
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F)
+library(nlme)
+library(lme4)
+library(dplyr)
+library(plyr)
+library(MASS)
+library(glmnet)
+library(leaps)
+library(minpack.lm)
+library(broom)
+library(lmtest)
+```
+
+5. The estimated density for the Hidalgo stamp data using regtangular kernel is plotted below using the function density() in R, and default bandwidth (0.00391).\
+We can see that this kernel density estimate doesn't look too smooth. There is a lot of noise coming from the structure and detail of the underlying density of the data.\
+
+```{r}
+#read data
+setwd("/Users/giangvu/Desktop/STAT 2221 - Advanced Applied Multivariate Analysis/HW/HW1")
+load("Hidalgo1872.rda")
+
+#apply rectanglular kernel
+plot(density(Hidalgo1872$thickness, kernel = "rectangular"), main = "Regtangular Kernel Density Estimation for Hidalgo 1872 Data ")
+```
+
+\newpage
+
+1. Below are the plots of Barlett-Epanechnikov kernel density estimates for 1000 samples of size $n$ from the claw density ($n=100,200,300$), with window-width $h$ estimated by 3 methods, UCV, BCV. and SJPI, respectively.\
+Looking at the 1000 kernel density estimates together in a plot, we can see that overall, the UCV method gives us the most "claw"-like estimates, with the most detail/noise in the plots. On the other hand, we have the BCV method that provides the smoothest estimates, with the least detail from the original claw density. The SJPI gives us something in between, its estimates show a moderate amount of smoothness as well as detail.\
+I also looked at the average bandwidth $h$ estimates from each method across all 1000 iterations, the UCV method indeed gave me the smallest average estimate for $h$, hence the most noise, while BCV gave me the biggest average estimate for $h$ (smoothest density estimates), and that value for SJPI is in the middle of the other two.\
+
+```{r, out.width="35%"}
+#fcn to generate data
+f.claw <- function(n) {
+  return(1/2*rnorm(n,0,1) + (1/10)*(rnorm(n,-1,1/10)+rnorm(n,-0.5,1/10)+
+                                       rnorm(n,0,1/10)+rnorm(n,0.5,1/10)+rnorm(n,1,1/10))) 
+}
+# #first draw
+# #first draw, SJPI < UCV < BCV
+# set.seed(1234)
+# d100 <- f.claw(100)
+# plot(density(d100, kernel = "epanechnikov", bw="ucv"), main = "Epanechnikov Density Estimate with UCV bandwidth estimate")
+# plot(density(d100, kernel = "epanechnikov", bw="bcv"), main = "Epanechnikov Density Estimate with BCV bandwidth estimate")
+# plot(density(d100, kernel = "epanechnikov", bw="SJ-dpi"), main = "Epanechnikov Density Estimate with SJPI bandwidth estimate")
+
+#seed
+set.seed(1234)
+
+#n=100
+#1000 samples with ucv
+i <- 1
+plot(density(f.claw(100), kernel = "epanechnikov", bw="ucv"), xlab="n = 100", main = "Epanechnikov Density Estimate with UCV bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(100), kernel = "epanechnikov", bw="ucv"))
+  i <- i+1
+}
+
+#1000 samples with bcv
+set.seed(1234)
+i <- 1
+plot(density(f.claw(100), kernel = "epanechnikov", bw="bcv"), xlab="n = 100", main = "Epanechnikov Density Estimate with BCV bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(100), kernel = "epanechnikov", bw="bcv"))
+  i <- i+1
+}
+
+#1000 samples with SJPI
+set.seed(1234)
+i <- 1
+plot(density(f.claw(100), kernel = "epanechnikov", bw="SJ-dpi"), xlab="n = 100", main = "Epanechnikov Density Estimate with SJPI bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(100), kernel = "epanechnikov", bw="SJ-dpi"))
+  i <- i+1
+}
+
+#looking at 1000 plots together, seems like UCV captures most "claws" or details, then SJPI, while BCV is the smoothest
+
+#only look at the bandwidth values, instead of plotting everything, loop to get h for 1000 samples
+# h100 <- data.frame(UCV=0,BCV=0,SJPI=0)
+# for (i in 1:1000){
+#   temp <- f.claw(100)
+#   h100[i,1] <- as.numeric(bw.ucv(temp))
+#   h100[i,2] <- as.numeric(bw.bcv(temp))
+#   h100[i,3] <- as.numeric(bw.SJ(temp, method = "dpi"))
+# }
+# 
+# sapply(h100, mean) 
+#with 1000 samples of size 100, the average bandwidth estimated by UCV is the smallest (least smooth density estimate), that by BCV is the largest (smoothest density estimate), and that by SJPI is in the middle.
+
+#Repeat for n = 200
+#1000 samples with ucv
+i <- 1
+plot(density(f.claw(200), kernel = "epanechnikov", bw="ucv"), xlab="n = 200", main = "Epanechnikov Density Estimate with UCV bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(200), kernel = "epanechnikov", bw="ucv"))
+  i <- i+1
+}
+
+#1000 samples with bcv
+set.seed(1234)
+i <- 1
+plot(density(f.claw(200), kernel = "epanechnikov", bw="bcv"),xlab="n = 200", main = "Epanechnikov Density Estimate with BCV bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(200), kernel = "epanechnikov", bw="bcv"))
+  i <- i+1
+}
+
+#1000 samples with SJ
+set.seed(1234)
+i <- 1
+plot(density(f.claw(200), kernel = "epanechnikov", bw="SJ-dpi"),xlab="n = 200", main = "Epanechnikov Density Estimate with SJPI bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(200), kernel = "epanechnikov", bw="SJ-dpi"))
+  i <- i+1
+}
+
+#Repeat for n = 300
+#1000 samples with ucv
+i <- 1
+plot(density(f.claw(300), kernel = "epanechnikov", bw="ucv"), xlab="n = 300", main = "Epanechnikov Density Estimate with UCV bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(300), kernel = "epanechnikov", bw="ucv"))
+  i <- i+1
+}
+
+#1000 samples with bcv
+set.seed(1234)
+i <- 1
+plot(density(f.claw(300), kernel = "epanechnikov", bw="bcv"),xlab="n = 300", main = "Epanechnikov Density Estimate with BCV bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(300), kernel = "epanechnikov", bw="bcv"))
+  i <- i+1
+}
+
+#1000 samples with SJ
+set.seed(1234)
+i <- 1
+plot(density(f.claw(300), kernel = "epanechnikov", bw="SJ-dpi"),xlab="n = 300", main = "Epanechnikov Density Estimate with SJPI bandwidth estimate")
+while (i < 1000) {
+  lines(density(f.claw(300), kernel = "epanechnikov", bw="SJ-dpi"))
+  i <- i+1
+}
+
+
+# plot(density(d100, kernel = "epanechnikov", bw="ucv"), col=2)
+# lines(density(d100, kernel = "epanechnikov", bw="bcv"), col=3)
+# lines(density(d100, kernel = "epanechnikov", bw="SJ-dpi"), col=4)
+# legend(x=1.5,y=0.6, legend = c("ucv","bcv","SJPI"), col = c(2,3,4), lty=1, cex=0.5)
+```
+\newpage
+2. Below are the plots of Barlett-Epanechnikov kernel density estimates with window-width $h$ estimated by 3 methods, UCV, BCV. and SJPI, respectively.\
+We can see that UCV method gives us the most detail/noise about the true density (lowest window-width estimate), while BCV gives us the smoothest density estimate (highest window-width estimate), and SJPI is in the middle of them with moderate smoothness and noise.\
+
+```{r, out.width="50%"}
+ushighways <- data.frame(read.table(file="ushighways.txt",header = T, sep = " "))
+plot(density(ushighways$Approx.Miles, kernel = "epanechnikov", bw="ucv"), main = "Epanechnikov Density Estimate with UCV bandwidth estimate")
+plot(density(ushighways$Approx.Miles, kernel = "epanechnikov", bw="bcv"), main = "Epanechnikov Density Estimate with BCV bandwidth estimate")
+plot(density(ushighways$Approx.Miles, kernel = "epanechnikov", bw="SJ-dpi"), main = "Epanechnikov Density Estimate with SJPI bandwidth estimate")
+
+```

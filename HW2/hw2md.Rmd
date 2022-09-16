@@ -1,0 +1,223 @@
+---
+title: ''
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F)
+library(nlme)
+library(lme4)
+library(dplyr)
+library(plyr)
+library(MASS)
+library(glmnet)
+library(leaps)
+library(minpack.lm)
+library(broom)
+library(lmtest)
+library(rrr)
+library(caret)
+options(scipen = 999)
+```
+
+1. Below, I defined a function to calculate coefficient estimates the multivariate ridge regression model based on the formula (6.41) in page 168, Izenman.\
+This function requires input $X_c$ as the centered design matrix, $vec(Y_c)$ as the vectorized centered response variables, $s$ as the number of response $Y$, $r$ as the number of independent variables, annd $k$ as the ridge penalty term/regularization parameter.\
+
+
+```{r echo=TRUE}
+#define a function to find theta hat, formula (6.41), pg. 168 Izenman
+mv.ridge <- function(Xc, vecYc, s, r, k){
+  I.s <- diag(s)
+  I.r <- diag(r)
+  K <- k*diag(s) #penalty term
+  v.thetah <- solve(kronecker(Xc %*% t(Xc),I.s)+kronecker(I.r,K)) %*% kronecker(Xc, I.s) %*% vecYc
+  return(matrix(v.thetah, nrow = s, ncol = r))
+}
+```
+
+2. To apply the formula in part 1 on the Norway paper data, I first separated and reshaped the data to get $X_c$ and $vec(Y_c)$ like the function requires.\
+In our data, $s=13$, $r=9$, and $n=29$. I chose a random value for $k=0.5$ just to test if the formula works (Note: we could incorporate methods to find the optimal value of $k$ here such as ridge trace, cross validation, etc.)\
+The result is a matrix with dimension (13 x 9) that contains the multivariate ridge regression coefficient estimates.\
+After doing that, I carried out 13 separate univariate ridge regression of each of the $Y$ variable, and compare the ridge coefficient estimate with the multivariate method above. And the results are exactly the same, meaning that we have seen that the classical approach to multivariate (ridge) regression (stacking all the $Y$'s on top of each other), is essentially the same as doing separate regression for each of the $Y$'s.\
+
+```{r, out.width="50%"}
+#read data
+setwd("/Users/giangvu/Desktop/STAT 2221 - Advanced Applied Multivariate Analysis/HW/HW2")
+load("norwaypaper1.rda")
+
+## multivar ridge
+#reshape data into desirable format (s=13, r=9, n=29)
+Y <- matrix(t(norwaypaper1[,1:13]), nrow = 13, ncol = 29) # Y (s x n), 13 Y's, 29 replications
+Ym <- matrix(rep(sapply(norwaypaper1[,1:13], mean),29), nrow = 13, ncol = 29) # mean of each Y
+Yc <- Y - Ym #centered Y
+v.Yc <- matrix(Yc, nrow = 29*13, ncol = 1) #stacking/vectorizing to get vec(Yc) (sn x 1)
+
+X <- matrix(t(norwaypaper1[,14:22]), nrow = 9, ncol = 29) # X (r x n), 9 X's, 29 replicates
+Xm <- matrix(rep(sapply(norwaypaper1[,14:22], mean), 29), nrow = 9, ncol = 29) # mean of each X
+Xc <- X - Xm #centered X
+v.Xc <- matrix(Xc, nrow = 9*29,ncol = 1) #vectorizing to get vec(Xc) (rn * 1)
+
+#apply the code in part 1 with penalty term k=0.5 (random value)
+theta.mv <- mv.ridge(Xc = Xc, vecYc = v.Yc, s=13, r=9, k =0.5)
+print("This is the estimates by multivariate ridge regression model")
+theta.mv
+
+## multiple univar ridges, using formula (5.92) p. 136 izenman
+theta.uv <- matrix(nrow = 13, ncol = 9) #create
+for(i in 1:13){
+  theta.uv[i,] <- solve(Xc%*%t(Xc) + 0.5*diag(9))%*%Xc%*%Yc[i,] #each row i is estimate of univariate ridge regression of that Yi with the 9 X's (i = 1,...,13)
+}
+print("This is the estimates by separate univariate ridge regression models")
+theta.uv
+```
+
+3. The rank trace does provide a good idea of which value of $t$ to choose. If we're using the "first elbow" rule, then I would say rank $t=3$ would be a good choice, but if we want "second elbow" to include more information, we can choose $t=6$, which does offer some more reduction in both dE and dC compared to $t=3$. But after 6, there isn't any more room for improvement that's worth the extra complexity of higher rank models.\
+
+```{r, out.width="90%"}
+n <- 29 #sample size (number of replicates)
+r <- 9 #number of predictors (X's) 
+s <- 13 #number of responses (Y's)
+
+##covariance matrix estimate (p 181 izenman)
+#components
+sigxx = (1/n) * Xc %*% t(Xc) #sigma_hat_xx
+sigyx = (1/n) * Yc %*% t(Xc) #sigma_hat_yx
+sigxy = t(sigyx) #sigma_hat_xy = t(sigma_hat_yx)
+sigyy = (1/n) * Yc %*% t(Yc) #sigma_hat_yy
+
+#gamma = identity(s)
+gam <- diag(s)
+ev <- eigen(gam)[[2]]; ed <- eigen(gam)[[1]]
+g.5 <- ev%*%sqrt(diag(ed))%*%t(ev)
+
+#covariance matrix (6.100 p 181 izenman)
+covmx <- (g.5) %*% sigyx %*% solve(sigxx) %*% sigxy %*% (g.5)
+
+##eigen decomp of covar matrix (p.184 Izenman)
+covmx.decomp <- eigen(covmx)
+lambda <- covmx.decomp$values #eigenvals estimate lambda hat
+V <- covmx.decomp$vectors #matrix V hat of eigenvectors, this is also V9 for full rannk solution 
+
+#tmax=min(s,r)=9)
+tmax = min(s,r)
+# A9 <- V
+# B9 <- V %*% sigyx %*% solve(sigxx)
+# C9 <- A9 %*% B9
+
+##calculate A and B and get a full list of 9 RRR coef C hat matrices for 9 values of rank 
+A <- list()
+B <- list()
+C.list <- vector(mode = "list", length = r)
+names(C.list) <- c("C1","C2","C3","C4","C5","C6","C7","C8","C9")
+#C.list[[9]] <- C9
+sigee <- vector(mode = "list", length = r)
+for(j in 1:tmax){
+  A[[j]] <- solve(g.5)%*%V[,1:j]
+  B[[j]] <- t(V[,1:j])%*%(g.5)%*%sigyx%*%solve(sigxx)
+  C.list[[j]] <- A[[j]] %*% B[[j]]
+  #C.list[[i]] <- matrix(A9[,1:i], ncol = i, nrow = s) %*% matrix(B9[1:i,], ncol = r, nrow = i)
+}
+for (i in 1:tmax){
+  sigee[[i]] <- (1/n)*(Yc - (C.list[[i]] %*% Xc)) %*% t(Yc - (C.list[[i]] %*% Xc))
+}
+
+#Rank trace
+dC <- NULL
+dE <- NULL
+for (j in 1:tmax){
+  dC[j] <- (sqrt(sum(diag(tcrossprod(C.list[[tmax]]-C.list[[j]])))))/
+             (sqrt(sum(diag(tcrossprod(C.list[[tmax]])))))
+    
+    dE[j] <- (sqrt(sum(diag(tcrossprod(sigee[[tmax]]-sigee[[j]])))))/
+	     (sqrt(sum(diag(tcrossprod(sigee[[tmax]]-sigyy)))))
+}
+
+dC <- c(1, dC)
+dE <- c(1, dE)
+names(dC) <- c(0, 1:tmax)
+names(dE) <- c(0, 1:tmax)
+plot(dC, dE, col="red", type="b", main="Norway Paper data, Gamma=Identity, k=0") 
+text(dC, dE, names(dC), pos=3)
+
+```
+
+4. Below is the result of applying CV (5-fold, 10-fold, and LOO-CV) to assess the value of $t$. Average prediction error at each rank is calculated, and looking at the table, we could see that $t=3$ is a good choice, because prediction error is minimized here. If we move forward with greater value for $t$, the prediction error actually increases and that's not desirable.\
+
+
+```{r}
+np <- apply(norwaypaper1, 2, function(x)(x-mean(x)))
+my.rrr <- function(data, s, r, t){
+  #reshape data into desirable format (s=13, r=9, n=... based on folds)
+  yc <- matrix(t(data[,1:s]), nrow = s) # Y (s x n), 13 Y's, n replications based on fold
+  xc <- matrix(t(data[,(s+1):(s+r)]), nrow = r) # X (r x n), 9 X's, n replicates based on fold
+  ##covariance matrix estimate (p 181 izenman)
+  #components
+  sxx = (1/nrow(data)) * xc %*% t(xc) #sigma_hat_xx
+  syx = (1/nrow(data)) * yc %*% t(xc) #sigma_hat_yx
+  sxy = t(syx) #sigma_hat_xy = t(sigma_hat_yx)
+  syy = (1/nrow(data)) * yc %*% t(yc) #sigma_hat_yy
+  
+  #gamma = identity(s)
+  g <- diag(s)
+  ev <- eigen(g)[[2]]; ed <- eigen(g)[[1]]
+  g.5 <- ev%*%sqrt(diag(ed))%*%t(ev)
+  
+  #covariance matrix (6.100 p 181 izenman)
+  cmx <- (g.5) %*% syx %*% solve(sxx) %*% sxy %*% (g.5)
+  
+  ##eigen decomp of covar matrix (p.184 Izenman)
+  cmx.decomp <- eigen(cmx)
+  lambda <- cmx.decomp$values #eigenvals estimate lambda hat
+  V <- cmx.decomp$vectors #matrix V hat of eigenvectors
+  
+  #calculate coeff estimate at rank t
+  a <- solve(g.5) %*% V[,1:t]
+  b <-t(V[,1:t]) %*% (g.5) %*% syx %*% solve(sxx)
+  c <- a %*% b
+  return(c)
+}
+
+#a matrix to store the CV prediction errors
+CV.err <- matrix(ncol = 3, nrow = 9, 
+                 dimnames = list(c("t=1","t=2","t=3","t=4","t=5","t=6","t=7","t=8","t=9"),
+                                 c("CV/5","CV/10","CV/n")))
+
+
+my.cv <- function(data, k){  #k = number of folds, 5, 10 or 29 (LOO-CV)
+  folds <- createFolds(rnorm(nrow(data)), k, list=TRUE, returnTrain = FALSE)
+  folds.mse <- numeric(length = r)
+  for(j in 1:9){ #r here is min(r,s) = max(t),this loop is to calculate mean prediction errors of k-fold, at each rank t
+    temp <- matrix(nrow = 13, ncol = k)
+    for(i in 1:k){
+      
+      #test set
+      test <- matrix(np[folds[[i]],],ncol = r+s)
+      test.yc <- matrix(t(test[,1:s]), nrow = s) # Y (s x n), 13 Y's, n replications based on fold
+      test.xc <- matrix(t(test[,(s+1):(s+r)]), nrow = r) # X (r x n), 9 X's, n replicates based on fold
+      #train set
+      train <- data[-folds[[i]],]
+      c.h <- my.rrr(train, s=13, r=9, t = j)
+      
+      #calculate mean prediction error for ith fold
+      #for each i
+      l.t <- matrix(nrow = 13, ncol = 1)
+        for (l in 1:13){
+          l.t[l,] <- 1/k * (test.yc[l,] - (matrix(c.h[l,], nrow = 1) %*% test.xc)) %*% t(test.yc[l,] - (matrix(c.h[l,], nrow = 1) %*% test.xc))
+        }
+      temp[,i] <- l.t
+    }
+    folds.mse[j] <- mean(apply(temp,1,mean))
+  }
+  return(folds.mse)
+}
+
+set.seed(123)
+CV.err[,1] <- my.cv(np, 5)
+set.seed(123)
+CV.err[,2] <- my.cv(np, 10)
+
+CV.err[,3] <- my.cv(np, 29)
+
+CV.err
+```
+
